@@ -3,21 +3,28 @@ let gl = null;
 let xrReferenceSpace = null;
 let program = null;
 let vertexBuffer = null;
-let indexBuffer = null;
 
 const vertexShaderSource = `
-  attribute vec3 a_position;
-  uniform mat4 u_projectionMatrix;
-  uniform mat4 u_viewMatrix;
+  attribute vec2 a_position;
+  varying vec2 v_uv;
   void main() {
-    gl_Position = u_projectionMatrix * u_viewMatrix * vec4(a_position, 1.0);
+    v_uv = a_position * 0.5 + 0.5; // Map [-1, 1] to [0, 1]
+    gl_Position = vec4(a_position, 0.0, 1.0);
   }
 `;
 
 const fragmentShaderSource = `
   precision mediump float;
+  varying vec2 v_uv;
   void main() {
-    gl_FragColor = vec4(0.0, 0.0, 1.0, 1.0); // Blue color
+    vec2 center = vec2(0.5, 0.5); // Center of the screen
+    float radius = 0.2;          // Radius of the transparent circle
+    float dist = distance(v_uv, center);
+    if (dist < radius) {
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); // Transparent circle
+    } else {
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); // Black overlay
+    }
   }
 `;
 
@@ -43,34 +50,16 @@ function setupWebGL() {
   // Compile shaders and link program
   program = createProgram(gl, vertexShaderSource, fragmentShaderSource);
 
-  // Set up the cube geometry
-  const cubeVertices = new Float32Array([
-    -0.1, -0.1, -0.1,
-     0.1, -0.1, -0.1,
-     0.1,  0.1, -0.1,
-    -0.1,  0.1, -0.1,
-    -0.1, -0.1,  0.1,
-     0.1, -0.1,  0.1,
-     0.1,  0.1,  0.1,
-    -0.1,  0.1,  0.1
+  // Set up a fullscreen quad
+  const quadVertices = new Float32Array([
+    -1.0, -1.0, // Bottom-left
+     1.0, -1.0, // Bottom-right
+    -1.0,  1.0, // Top-left
+     1.0,  1.0  // Top-right
   ]);
-
-  const cubeIndices = new Uint16Array([
-    0, 1, 2, 0, 2, 3, // front
-    4, 5, 6, 4, 6, 7, // back
-    0, 1, 5, 0, 5, 4, // bottom
-    2, 3, 7, 2, 7, 6, // top
-    0, 3, 7, 0, 7, 4, // left
-    1, 2, 6, 1, 6, 5  // right
-  ]);
-
   vertexBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, cubeVertices, gl.STATIC_DRAW);
-
-  indexBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cubeIndices, gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 }
 
 function onSessionStarted() {
@@ -87,33 +76,26 @@ function onXRFrame(time, frame) {
   const pose = frame.getViewerPose(xrReferenceSpace);
   if (pose) {
     gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
     for (const view of pose.views) {
       const viewport = session.renderState.baseLayer.getViewport(view);
       gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
 
-      renderCube(view);
+      renderOverlay();
     }
   }
 }
 
-function renderCube(view) {
+function renderOverlay() {
   gl.useProgram(program);
 
   const positionLocation = gl.getAttribLocation(program, "a_position");
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
   gl.enableVertexAttribArray(positionLocation);
-  gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-  const projectionMatrixLocation = gl.getUniformLocation(program, "u_projectionMatrix");
-  const viewMatrixLocation = gl.getUniformLocation(program, "u_viewMatrix");
-
-  gl.uniformMatrix4fv(projectionMatrixLocation, false, view.projectionMatrix);
-  gl.uniformMatrix4fv(viewMatrixLocation, false, view.transform.inverse.matrix);
-
-  gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 // Helper functions to create shaders and program
